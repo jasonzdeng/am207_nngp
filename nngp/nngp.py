@@ -32,16 +32,6 @@ import tensorflow as tf
 
 import interp
 
-flags = tf.app.flags
-FLAGS = flags.FLAGS
-
-flags.DEFINE_boolean("use_precomputed_grid", True,
-                     "Option to save/load pre-computed grid")
-flags.DEFINE_integer(
-    "fraction_of_int32", 32,
-    "allow batches at most of size int32.max / fraction_of_int32")
-
-
 class NNGPKernel(object):
   """The iterative covariance Kernel for Neural Network Gaussian Process.
 
@@ -70,6 +60,8 @@ class NNGPKernel(object):
                max_var=100,
                max_gauss=100,
                use_fixed_point_norm=False,
+               fraction_of_int32 = 32,
+               use_precomputed_grid=False,
                grid_path=None,
                sess=None):
     self.depth = depth
@@ -77,7 +69,10 @@ class NNGPKernel(object):
     self.bias_var = bias_var
     self.use_fixed_point_norm = use_fixed_point_norm
     self.sess = sess
-    if FLAGS.use_precomputed_grid and (grid_path is None):
+    self.fraction_of_int32 = fraction_of_int32
+    self.use_precomputed_grid = use_precomputed_grid
+    
+    if use_precomputed_grid and (grid_path is None):
       raise ValueError("grid_path must be specified to use precomputed grid.")
     self.grid_path = grid_path
 
@@ -92,7 +87,7 @@ class NNGPKernel(object):
     """Get covariance grid by loading or computing a new one.
     """
     # File configuration for precomputed grid
-    if FLAGS.use_precomputed_grid:
+    if self.use_precomputed_grid:
       grid_path = self.grid_path
       # TODO(jaehlee) np.save have broadcasting error when n_var==n_corr.
       if n_var == n_corr:
@@ -102,7 +97,7 @@ class NNGPKernel(object):
       grid_file_name += "_mv{0:d}_mg{1:d}".format(max_var, max_gauss)
 
     # Load grid file if it exists already
-    if (FLAGS.use_precomputed_grid and
+    if (self.use_precomputed_grid and
         tf.gfile.Exists(os.path.join(grid_path, grid_file_name))):
       with tf.gfile.Open(os.path.join(grid_path, grid_file_name), "rb") as f:
         grid_data_np = np.load(f)
@@ -117,7 +112,7 @@ class NNGPKernel(object):
       tf.logging.info("Generating interpolation grid...")
       grid_data = _compute_qmap_grid(self.nonlin_fn, n_gauss, n_var, n_corr,
                                      max_var=max_var, max_gauss=max_gauss)
-      if FLAGS.use_precomputed_grid:
+      if self.use_precomputed_grid:
         with tf.Session() as sess:
           grid_data_np = sess.run(grid_data)
         tf.gfile.MakeDirs(grid_path)
@@ -178,7 +173,7 @@ class NNGPKernel(object):
         current_qaa = self.weight_var * tf.convert_to_tensor(
             [1.], dtype=tf.float64) + self.bias_var
       self.layer_qaa_dict = {0: current_qaa}
-      for l in xrange(self.depth):
+      for l in range(self.depth):
         with tf.name_scope("layer_%d" % l):
           samp_qaa = interp.interp_lin(
               self.var_aa_grid, self.qaa_grid, current_qaa)
@@ -212,7 +207,7 @@ class NNGPKernel(object):
       q_ab = self.weight_var * q_ab + self.bias_var
       corr = q_ab / q_aa_init[0]
 
-      if FLAGS.fraction_of_int32 > 1:
+      if self.fraction_of_int32 > 1:
         batch_size, batch_count = self._get_batch_size_and_count(input1, input2)
         with tf.name_scope("q_ab"):
           q_ab_all = []
@@ -222,7 +217,7 @@ class NNGPKernel(object):
                   batch_size * b_x : batch_size * (b_x + 1), :]
               corr_flat_batch = tf.reshape(corr_flat_batch, [-1])
 
-              for l in xrange(self.depth):
+              for l in range(self.depth):
                 with tf.name_scope("layer_%d" % l):
                   q_aa = self.layer_qaa_dict[l]
                   q_ab = interp.interp_lin_2d(x=self.var_aa_grid,
@@ -240,7 +235,7 @@ class NNGPKernel(object):
       else:
         with tf.name_scope("q_ab"):
           corr_flat = tf.reshape(corr, [-1])
-          for l in xrange(self.depth):
+          for l in range(self.depth):
             with tf.name_scope("layer_%d" % l):
               q_aa = self.layer_qaa_dict[l]
               q_ab = interp.interp_lin_2d(x=self.var_aa_grid,
@@ -281,8 +276,7 @@ class NNGPKernel(object):
     input1_size = input1.shape[0].value
     input2_size = input2.shape[0].value
 
-    batch_size = min(np.iinfo(np.int32).max //
-                     (FLAGS.fraction_of_int32 * input2_size), input1_size)
+    batch_size = min(np.iinfo(np.int32).max // (self.fraction_of_int32 * input2_size), input1_size)
     while input1_size % batch_size != 0:
       batch_size -= 1
 

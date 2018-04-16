@@ -23,12 +23,6 @@ import time
 
 import tensorflow as tf
 
-flags = tf.app.flags
-FLAGS = flags.FLAGS
-
-flags.DEFINE_boolean("print_kernel", False, "Option to print out kernel")
-
-
 class GaussianProcessRegression(object):
   """Gaussian process regression model based on GPflow.
 
@@ -38,7 +32,7 @@ class GaussianProcessRegression(object):
     kern: NNGPKernel class
   """
 
-  def __init__(self, input_x, output_y, kern):
+  def __init__(self, input_x, output_y, kern, print_kernel = False):
     with tf.name_scope("init"):
       self.input_x = input_x
       self.output_y = output_y
@@ -46,14 +40,12 @@ class GaussianProcessRegression(object):
       _, self.output_dim = output_y.shape
 
       self.kern = kern
+      self.print_kernel = print_kernel
       self.stability_eps = tf.identity(tf.placeholder(tf.float64))
       self.current_stability_eps = 1e-10
 
-      self.y_pl = tf.placeholder(
-          tf.float64, [self.num_train, self.output_dim], name="y_train")
-      self.x_pl = tf.identity(
-          tf.placeholder(tf.float64, [self.num_train, self.input_dim],
-                         name="x_train"))
+      self.y_pl = tf.placeholder(tf.float64, [self.num_train, self.output_dim], name="y_train")
+      self.x_pl = tf.identity(tf.placeholder(tf.float64, [self.num_train, self.input_dim],name="x_train"))
 
       self.l_np = None
       self.v_np = None
@@ -90,7 +82,7 @@ class GaussianProcessRegression(object):
     tf.logging.info("Computing Kernel")
     self.k_data_data_reg = self.k_data_data + tf.eye(
         self.input_x.shape[0], dtype=tf.float64) * self.stability_eps
-    if FLAGS.print_kernel:
+    if self.print_kernel:
       self.k_data_data_reg = tf.Print(
           self.k_data_data_reg, [self.k_data_data_reg],
           message="K_DD = ", summarize=100)
