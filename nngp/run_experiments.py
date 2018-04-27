@@ -74,160 +74,159 @@ flags.DEFINE_integer('max_gauss', 10,
 
 
 def set_default_hparams():
-  return tf.contrib.training.HParams(
-      nonlinearity='tanh', weight_var=1.3, bias_var=0.2, depth=2)
+    return tf.contrib.training.HParams(
+        nonlinearity='tanh', weight_var=1.3, bias_var=0.2, depth=2)
 
 
 def do_eval(sess, model, x_data, y_data, save_pred=False):
-  """Run evaluation."""
+    """Run evaluation."""
 
-  gp_prediction, stability_eps = model.predict(x_data, sess)
+    gp_prediction, stability_eps = model.predict(x_data, sess)
 
-  pred_1 = np.argmax(gp_prediction, axis=1)
-  accuracy = np.sum(pred_1 == np.argmax(y_data, axis=1)) / float(len(y_data))
-  mse = np.mean(np.mean((gp_prediction - y_data)**2, axis=1))
-  pred_norm = np.mean(np.linalg.norm(gp_prediction, axis=1))
-  tf.logging.info('Accuracy: %.4f'%accuracy)
-  tf.logging.info('MSE: %.8f'%mse)
+    pred_1 = np.argmax(gp_prediction, axis=1)
+    accuracy = np.sum(pred_1 == np.argmax(y_data, axis=1)) / float(len(y_data))
+    mse = np.mean(np.mean((gp_prediction - y_data) ** 2, axis=1))
+    pred_norm = np.mean(np.linalg.norm(gp_prediction, axis=1))
+    tf.logging.info('Accuracy: %.4f' % accuracy)
+    tf.logging.info('MSE: %.8f' % mse)
 
-  if save_pred:
-    with tf.gfile.Open(
-        os.path.join(FLAGS.experiment_dir, 'gp_prediction_stats.npy'),
-        'w') as f:
-      np.save(f, gp_prediction)
+    if save_pred:
+        with tf.gfile.Open(
+                os.path.join(FLAGS.experiment_dir, 'gp_prediction_stats.npy'),
+                'w') as f:
+            np.save(f, gp_prediction)
 
-  return accuracy, mse, pred_norm, stability_eps
+    return accuracy, mse, pred_norm, stability_eps
 
 
 def run_nngp_eval(hparams, run_dir):
-  """Runs experiments."""
+    """Runs experiments."""
 
-  tf.gfile.MakeDirs(run_dir)
-  # Write hparams to experiment directory.
-  with tf.gfile.GFile(run_dir + '/hparams', mode='w') as f:
-    f.write(hparams.to_proto().SerializeToString())
+    tf.gfile.MakeDirs(run_dir)
+    # Write hparams to experiment directory.
+    with tf.gfile.GFile(run_dir + '/hparams', mode='w') as f:
+        f.write(hparams.to_proto().SerializeToString())
 
-  tf.logging.info('Starting job.')
-  tf.logging.info('Hyperparameters')
-  tf.logging.info('---------------------')
-  tf.logging.info(hparams)
-  tf.logging.info('---------------------')
-  tf.logging.info('Loading data')
+    tf.logging.info('Starting job.')
+    tf.logging.info('Hyperparameters')
+    tf.logging.info('---------------------')
+    tf.logging.info(hparams)
+    tf.logging.info('---------------------')
+    tf.logging.info('Loading data')
 
-  # Get the sets of images and labels for training, validation, and
-  # # test on dataset.
-  if FLAGS.dataset == 'mnist':
-    (train_image, train_label, valid_image, valid_label, test_image,
-     test_label) = load_dataset.load_mnist(
-         num_train=FLAGS.num_train,
-         mean_subtraction=True,
-         random_roated_labels=False)
-  else:
-    raise NotImplementedError
-
-  tf.logging.info('Building Model')
-
-  if hparams.nonlinearity == 'tanh':
-    nonlin_fn = tf.tanh
-  elif hparams.nonlinearity == 'relu':
-    nonlin_fn = tf.nn.relu
-  else:
-    raise NotImplementedError
-
-  with tf.Session() as sess:
-    # Construct NNGP kernel
-    nngp_kernel = nngp.NNGPKernel(
-        depth=hparams.depth,
-        weight_var=hparams.weight_var,
-        bias_var=hparams.bias_var,
-        nonlin_fn=nonlin_fn,
-        grid_path=FLAGS.grid_path,
-        n_gauss=FLAGS.n_gauss,
-        n_var=FLAGS.n_var,
-        n_corr=FLAGS.n_corr,
-        max_gauss=FLAGS.max_gauss,
-        max_var=FLAGS.max_var,
-        use_fixed_point_norm=FLAGS.use_fixed_point_norm)
-
-    # Construct Gaussian Process Regression model
-    model = gpr.GaussianProcessRegression(
-        train_image, train_label, kern=nngp_kernel)
-
-    start_time = time.time()
-    tf.logging.info('Training')
-
-    # For large number of training points, we do not evaluate on full set to
-    # save on training evaluation time.
-    if FLAGS.num_train <= 5000:
-      acc_train, mse_train, norm_train, final_eps = do_eval(
-          sess, model, train_image[:FLAGS.num_eval],
-          train_label[:FLAGS.num_eval])
-      tf.logging.info('Evaluation of training set (%d examples) took '
-                      '%.3f secs'%(
-                          min(FLAGS.num_train, FLAGS.num_eval),
-                          time.time() - start_time))
+    # Get the sets of images and labels for training, validation, and
+    # # test on dataset.
+    if FLAGS.dataset == 'mnist':
+        (train_image, train_label, valid_image, valid_label, test_image,
+         test_label) = load_dataset.load_mnist(
+            num_train=FLAGS.num_train,
+            mean_subtraction=True,
+            random_roated_labels=False)
     else:
-      acc_train, mse_train, norm_train, final_eps = do_eval(
-          sess, model, train_image[:1000], train_label[:1000])
-      tf.logging.info('Evaluation of training set (%d examples) took '
-                      '%.3f secs'%(1000, time.time() - start_time))
+        raise NotImplementedError
 
-    start_time = time.time()
-    tf.logging.info('Validation')
-    acc_valid, mse_valid, norm_valid, _ = do_eval(
-        sess, model, valid_image[:FLAGS.num_eval],
-        valid_label[:FLAGS.num_eval])
-    tf.logging.info('Evaluation of valid set (%d examples) took %.3f secs'%(
-        FLAGS.num_eval, time.time() - start_time))
+    tf.logging.info('Building Model')
 
-    start_time = time.time()
-    tf.logging.info('Test')
-    acc_test, mse_test, norm_test, _ = do_eval(
-        sess,
-        model,
-        test_image[:FLAGS.num_eval],
-        test_label[:FLAGS.num_eval],
-        save_pred=False)
-    tf.logging.info('Evaluation of test set (%d examples) took %.3f secs'%(
-        FLAGS.num_eval, time.time() - start_time))
+    if hparams.nonlinearity == 'tanh':
+        nonlin_fn = tf.tanh
+    elif hparams.nonlinearity == 'relu':
+        nonlin_fn = tf.nn.relu
+    else:
+        raise NotImplementedError
 
-  metrics = {
-      'train_acc': float(acc_train),
-      'train_mse': float(mse_train),
-      'train_norm': float(norm_train),
-      'valid_acc': float(acc_valid),
-      'valid_mse': float(mse_valid),
-      'valid_norm': float(norm_valid),
-      'test_acc': float(acc_test),
-      'test_mse': float(mse_test),
-      'test_norm': float(norm_test),
-      'stability_eps': float(final_eps),
-  }
+    with tf.Session() as sess:
+        # Construct NNGP kernel
+        nngp_kernel = nngp.NNGPKernel(
+            depth=hparams.depth,
+            weight_var=hparams.weight_var,
+            bias_var=hparams.bias_var,
+            nonlin_fn=nonlin_fn,
+            grid_path=FLAGS.grid_path,
+            n_gauss=FLAGS.n_gauss,
+            n_var=FLAGS.n_var,
+            n_corr=FLAGS.n_corr,
+            max_gauss=FLAGS.max_gauss,
+            max_var=FLAGS.max_var,
+            use_fixed_point_norm=FLAGS.use_fixed_point_norm)
 
-  record_results = [
-      FLAGS.num_train, hparams.nonlinearity, hparams.weight_var,
-      hparams.bias_var, hparams.depth, acc_train, acc_valid, acc_test,
-      mse_train, mse_valid, mse_test, final_eps
-  ]
-  if nngp_kernel.use_fixed_point_norm:
-    metrics['var_fixed_point'] = float(nngp_kernel.var_fixed_point_np[0])
-    record_results.append(nngp_kernel.var_fixed_point_np[0])
+        # Construct Gaussian Process Regression model
+        model = gpr.GaussianProcessRegression(
+            train_image, train_label, kern=nngp_kernel)
 
-  # Store data
-  result_file = os.path.join(run_dir, 'results.csv')
-  with tf.gfile.Open(result_file, 'a') as f:
-    filewriter = csv.writer(f)
-    filewriter.writerow(record_results)
+        start_time = time.time()
+        tf.logging.info('Training')
 
-  return metrics
+        # For large number of training points, we do not evaluate on full set to
+        # save on training evaluation time.
+        if FLAGS.num_train <= 5000:
+            acc_train, mse_train, norm_train, final_eps = do_eval(
+                sess, model, train_image[:FLAGS.num_eval],
+                train_label[:FLAGS.num_eval])
+            tf.logging.info('Evaluation of training set (%d examples) took '
+                            '%.3f secs' % (
+                                min(FLAGS.num_train, FLAGS.num_eval),
+                                time.time() - start_time))
+        else:
+            acc_train, mse_train, norm_train, final_eps = do_eval(
+                sess, model, train_image[:1000], train_label[:1000])
+            tf.logging.info('Evaluation of training set (%d examples) took '
+                            '%.3f secs' % (1000, time.time() - start_time))
+
+        start_time = time.time()
+        tf.logging.info('Validation')
+        acc_valid, mse_valid, norm_valid, _ = do_eval(
+            sess, model, valid_image[:FLAGS.num_eval],
+            valid_label[:FLAGS.num_eval])
+        tf.logging.info('Evaluation of valid set (%d examples) took %.3f secs' % (
+            FLAGS.num_eval, time.time() - start_time))
+
+        start_time = time.time()
+        tf.logging.info('Test')
+        acc_test, mse_test, norm_test, _ = do_eval(
+            sess,
+            model,
+            test_image[:FLAGS.num_eval],
+            test_label[:FLAGS.num_eval],
+            save_pred=False)
+        tf.logging.info('Evaluation of test set (%d examples) took %.3f secs' % (
+            FLAGS.num_eval, time.time() - start_time))
+
+    metrics = {
+        'train_acc': float(acc_train),
+        'train_mse': float(mse_train),
+        'train_norm': float(norm_train),
+        'valid_acc': float(acc_valid),
+        'valid_mse': float(mse_valid),
+        'valid_norm': float(norm_valid),
+        'test_acc': float(acc_test),
+        'test_mse': float(mse_test),
+        'test_norm': float(norm_test),
+        'stability_eps': float(final_eps),
+    }
+
+    record_results = [
+        FLAGS.num_train, hparams.nonlinearity, hparams.weight_var,
+        hparams.bias_var, hparams.depth, acc_train, acc_valid, acc_test,
+        mse_train, mse_valid, mse_test, final_eps
+    ]
+    if nngp_kernel.use_fixed_point_norm:
+        metrics['var_fixed_point'] = float(nngp_kernel.var_fixed_point_np[0])
+        record_results.append(nngp_kernel.var_fixed_point_np[0])
+
+    # Store data
+    result_file = os.path.join(run_dir, 'results.csv')
+    with tf.gfile.Open(result_file, 'a') as f:
+        filewriter = csv.writer(f)
+        filewriter.writerow(record_results)
+
+    return metrics
 
 
 def main(argv):
-  del argv  # Unused
-  hparams = set_default_hparams().parse(FLAGS.hparams)
-  run_nngp_eval(hparams, FLAGS.experiment_dir)
+    del argv  # Unused
+    hparams = set_default_hparams().parse(FLAGS.hparams)
+    run_nngp_eval(hparams, FLAGS.experiment_dir)
 
 
 if __name__ == '__main__':
-  tf.app.run(main)
-
+    tf.app.run(main)
